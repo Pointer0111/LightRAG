@@ -162,6 +162,101 @@ def chunking_by_token_size(
     return results
 
 
+def chunking_by_paragraph_then_token(
+    tokenizer: Tokenizer,
+    content: str,
+    split_by_character: str | None = None,
+    split_by_character_only: bool = False,
+    chunk_overlap_token_size: int = 100,
+    chunk_token_size: int = 1200,
+) -> list[dict[str, Any]]:
+    effective_split = split_by_character
+    if effective_split is None:
+        effective_split = "\n\n" if "\n\n" in content else "\n"
+
+    overlap = max(0, min(int(chunk_overlap_token_size), int(chunk_token_size) - 1))
+    limit = max(1, int(chunk_token_size))
+
+    segments = [seg.strip() for seg in content.split(effective_split)]
+    segments = [seg for seg in segments if seg]
+
+    results: list[dict[str, Any]] = []
+    chunk_index = 0
+    carry_tokens: list[int] = []
+
+    def flush_chunk(text: str) -> None:
+        nonlocal chunk_index, carry_tokens
+        text = text.strip()
+        if not text:
+            return
+        tokens = tokenizer.encode(text)
+        results.append(
+            {
+                "tokens": len(tokens),
+                "content": text,
+                "chunk_order_index": chunk_index,
+            }
+        )
+        chunk_index += 1
+        carry_tokens = tokens[-overlap:] if overlap > 0 else []
+
+    current_parts: list[str] = []
+    current_tokens = 0
+
+    for seg in segments:
+        seg_tokens = tokenizer.encode(seg)
+        seg_len = len(seg_tokens)
+
+        if split_by_character_only and seg_len > limit:
+            raise ChunkTokenLimitExceededError(
+                chunk_tokens=seg_len,
+                chunk_token_limit=limit,
+                chunk_preview=seg[:120],
+            )
+
+        if seg_len > limit:
+            if current_parts:
+                flush_chunk(effective_split.join(current_parts))
+                current_parts = []
+                current_tokens = 0
+
+            step = max(1, limit - overlap)
+            for start in range(0, seg_len, step):
+                window = seg_tokens[start : start + limit]
+                flush_chunk(tokenizer.decode(window))
+            continue
+
+        prefix = tokenizer.decode(carry_tokens).strip() if carry_tokens else ""
+        prefix_tokens = len(carry_tokens)
+
+        if not current_parts and prefix:
+            current_parts.append(prefix)
+            current_tokens = prefix_tokens
+
+        if current_tokens + seg_len <= limit or not current_parts:
+            current_parts.append(seg)
+            current_tokens += seg_len
+            continue
+
+        flush_chunk(effective_split.join(current_parts))
+        current_parts = []
+        current_tokens = 0
+
+        prefix = tokenizer.decode(carry_tokens).strip() if carry_tokens else ""
+        prefix_tokens = len(carry_tokens)
+        if prefix:
+            current_parts.append(prefix)
+            current_tokens = prefix_tokens
+
+        current_parts.append(seg)
+        current_tokens += seg_len
+
+    if current_parts:
+        flush_chunk(effective_split.join(current_parts))
+
+    return results
+
+
 async def _handle_entity_relation_summary(
     description_type: str,
     entity_or_relation_name: str,
@@ -3462,26 +3557,93 @@ async def _get_vector_context(
         results = await chunks_vdb.query(
             query, top_k=search_top_k, query_embedding=query_embedding
         )
-        if not results:
+
+        import os, json
+
+        bm25_chunks = []
+        try:
+            workspace_dir = chunks_vdb.global_config.get("working_dir", "")
+            if hasattr(chunks_vdb, "workspace") and chunks_vdb.workspace:
+                workspace_dir = os.path.join(workspace_dir, chunks_vdb.workspace)
+            
+            # The namespace for text_chunks is typically 'text_chunks'
+            text_chunks_path = os.path.join(workspace_dir, "kv_store_text_chunks.json")
+            if os.path.exists(text_chunks_path):
+                import jieba
+                from rank_bm25 import BM25Okapi
+                
+                with open(text_chunks_path, "r", encoding="utf-8") as f:
+                    all_chunks = json.load(f)
+                    
+                corpus = []
+                chunk_ids = []
+                for k, v in all_chunks.items():
+                    content = v.get("content", "")
+                    if content:
+                        corpus.append(list(jieba.cut(content)))
+                        chunk_ids.append(k)
+                        
+                if corpus:
+                    bm25 = BM25Okapi(corpus)
+                    tokenized_query = list(jieba.cut(query))
+                    doc_scores = bm25.get_scores(tokenized_query)
+                    
+                    # Get top_k indices
+                    top_indices = sorted(range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True)[:search_top_k]
+                    
+                    for idx in top_indices:
+                        if doc_scores[idx] > 0:
+                            chunk_id = chunk_ids[idx]
+                            v = all_chunks[chunk_id]
+                            bm25_chunks.append({
+                                "id": chunk_id,
+                                "content": v.get("content", ""),
+                                "file_path": v.get("file_path", "unknown_source"),
+                                "created_at": v.get("created_at", None),
+                                "bm25_score": doc_scores[idx]
+                            })
+        except Exception as e:
+            logger.warning(f"Failed to perform BM25 hybrid search: {e}")
+
+        if not results and not bm25_chunks:
             logger.info(
                 f"Naive query: 0 chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})"
             )
             return []
 
         valid_chunks = []
+        seen_ids = set()
+        
+        # Add vector chunks
         for result in results:
             if "content" in result:
+                chunk_id = result.get("id")
+                seen_ids.add(chunk_id)
                 chunk_with_metadata = {
                     "content": result["content"],
                     "created_at": result.get("created_at", None),
                     "file_path": result.get("file_path", "unknown_source"),
-                    "source_type": "vector",  # Mark the source type
-                    "chunk_id": result.get("id"),  # Add chunk_id for deduplication
+                    "source_type": "vector",
+                    "chunk_id": chunk_id,
+                }
+                valid_chunks.append(chunk_with_metadata)
+                
+        # Add BM25 chunks
+        for result in bm25_chunks:
+            chunk_id = result.get("id")
+            if chunk_id not in seen_ids:
+                seen_ids.add(chunk_id)
+                chunk_with_metadata = {
+                    "content": result["content"],
+                    "created_at": result.get("created_at", None),
+                    "file_path": result.get("file_path", "unknown_source"),
+                    "source_type": "bm25",
+                    "chunk_id": chunk_id,
                 }
                 valid_chunks.append(chunk_with_metadata)
 
         logger.info(
-            f"Naive query: {len(valid_chunks)} chunks (chunk_top_k:{search_top_k} cosine:{cosine_threshold})"
+            f"Naive/Hybrid query: {len(valid_chunks)} chunks (vector: {len(results)}, bm25: {len(bm25_chunks)})"
         )
         return valid_chunks
 

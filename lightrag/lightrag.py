@@ -87,6 +87,7 @@ from lightrag.base import (
 )
 from lightrag.namespace import NameSpace
 from lightrag.operate import (
+    chunking_by_paragraph_then_token,
     chunking_by_token_size,
     extract_entities,
     merge_nodes_and_edges,
@@ -300,7 +301,11 @@ class LightRAG:
             int,
         ],
         Union[List[Dict[str, Any]], Awaitable[List[Dict[str, Any]]]],
-    ] = field(default_factory=lambda: chunking_by_token_size)
+    ] = field(
+        default_factory=lambda: chunking_by_token_size
+        if os.getenv("CHUNK_METHOD", "structure").lower() in {"token", "token_size"}
+        else chunking_by_paragraph_then_token
+    )
     """
     Custom chunking function for splitting text into chunks before processing.
 
@@ -1976,7 +1981,17 @@ class LightRAG:
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
                                             "metadata": {
-                                                "processing_start_time": processing_start_time
+                                                "processing_start_time": processing_start_time,
+                                                "chunking": {
+                                                    "method": getattr(
+                                                        self.chunking_func, "__name__", "unknown"
+                                                    ),
+                                                    "chunk_token_size": self.chunk_token_size,
+                                                    "chunk_overlap_token_size": self.chunk_overlap_token_size,
+                                                    "split_by_character": split_by_character,
+                                                    "split_by_character_only": split_by_character_only,
+                                                    "tiktoken_model_name": self.tiktoken_model_name,
+                                                },
                                             },
                                         }
                                     }
@@ -2076,6 +2091,16 @@ class LightRAG:
                                         "metadata": {
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
+                                            "chunking": {
+                                                "method": getattr(
+                                                    self.chunking_func, "__name__", "unknown"
+                                                ),
+                                                "chunk_token_size": self.chunk_token_size,
+                                                "chunk_overlap_token_size": self.chunk_overlap_token_size,
+                                                "split_by_character": split_by_character,
+                                                "split_by_character_only": split_by_character_only,
+                                                "tiktoken_model_name": self.tiktoken_model_name,
+                                            },
                                         },
                                     }
                                 }
