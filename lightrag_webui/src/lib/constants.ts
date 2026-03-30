@@ -5,18 +5,18 @@ export const webuiPrefix = '/webui/'
 
 export const controlButtonVariant: ButtonVariantType = 'ghost'
 
-export const labelColorDarkTheme = '#FFFFFF'
-export const LabelColorHighlightedDarkTheme = '#000000'
-export const labelColorLightTheme = '#000'
+export const labelColorDarkTheme = '#E8F6FF'
+export const LabelColorHighlightedDarkTheme = '#02111b'
+export const labelColorLightTheme = '#EAF7FF'
 
-export const nodeColorDisabled = '#E2E2E2'
-export const nodeBorderColor = '#EEEEEE'
-export const nodeBorderColorSelected = '#F57F17'
+export const nodeColorDisabled = '#1d2f45'
+export const nodeBorderColor = '#6ee7ff'
+export const nodeBorderColorSelected = '#ff8a3d'
 
-export const edgeColorDarkTheme = '#888888'
-export const edgeColorSelected = '#F57F17'
-export const edgeColorHighlightedDarkTheme = '#F57F17'
-export const edgeColorHighlightedLightTheme = '#F57F17'
+export const edgeColorDarkTheme = '#4dd8ff'
+export const edgeColorSelected = '#ff8a3d'
+export const edgeColorHighlightedDarkTheme = '#c06bff'
+export const edgeColorHighlightedLightTheme = '#7ae9ff'
 
 export const searchResultLimit = 50
 export const labelListLimit = 100

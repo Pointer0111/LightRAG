@@ -1,46 +1,46 @@
+/**
+ * GraphSearch – node search bar for the 3D graph viewer.
+ *
+ * Replaced @react-sigma/graph-search with a self-contained implementation
+ * that reads node data from rawGraph (via useGraphStore) instead of sigmaGraph,
+ * so it works independently of the Sigma rendering context.
+ */
 import { FC, useCallback, useEffect } from 'react'
-import {
-  EdgeById,
-  GraphSearchInputProps,
-  GraphSearchContextProviderProps
-} from '@react-sigma/graph-search'
-import { AsyncSearch } from '@/components/ui/AsyncSearch'
-import { searchResultLimit } from '@/lib/constants'
-import { useGraphStore } from '@/stores/graph'
 import MiniSearch from 'minisearch'
 import { useTranslation } from 'react-i18next'
 
-// Message item identifier for search results
-export const messageId = '__message_item'
+import { AsyncSearch } from '@/components/ui/AsyncSearch'
+import { searchResultLimit } from '@/lib/constants'
+import { useGraphStore } from '@/stores/graph'
 
-// Search result option item interface
-export interface OptionItem {
+// ── Shared option type (consumed by both GraphSearch and GraphViewer) ────
+export interface SearchOptionItem {
   id: string
-  type: 'nodes' | 'edges' | 'message'
+  type: 'nodes' | 'message'
   message?: string
 }
+// Backward-compat alias
+export type OptionItem = SearchOptionItem
 
+// ── Node option rendered in the dropdown ─────────────────────────────────
 const NodeOption = ({ id }: { id: string }) => {
-  const graph = useGraphStore.use.sigmaGraph()
+  const rawGraph = useGraphStore.use.rawGraph()
+  if (!rawGraph) return null
 
-  // Early return if no graph or node doesn't exist
-  if (!graph?.hasNode(id)) {
-    return null
-  }
+  const node = rawGraph.getNode(id)
+  if (!node) return null
 
-  // Safely get node attributes with fallbacks
-  const label = graph.getNodeAttribute(id, 'label') || id
-  const color = graph.getNodeAttribute(id, 'color') || '#666'
-  const size = graph.getNodeAttribute(id, 'size') || 4
+  const label = node.labels.join(', ') || id
+  const color = node.color || '#4DE8FF'
+  const size = node.size || 6
 
-  // Custom node display component that doesn't rely on @react-sigma/graph-search
   return (
     <div className="flex items-center gap-2 p-2 text-sm">
       <div
-        className="rounded-full flex-shrink-0"
+        className="flex-shrink-0 rounded-full"
         style={{
-          width: Math.max(8, Math.min(size * 2, 16)),
-          height: Math.max(8, Math.min(size * 2, 16)),
+          width: Math.max(8, Math.min(size * 1.5, 16)),
+          height: Math.max(8, Math.min(size * 1.5, 16)),
           backgroundColor: color
         }}
       />
@@ -49,157 +49,86 @@ const NodeOption = ({ id }: { id: string }) => {
   )
 }
 
-function OptionComponent(item: OptionItem) {
-  return (
-    <div>
-      {item.type === 'nodes' && <NodeOption id={item.id} />}
-      {item.type === 'edges' && <EdgeById id={item.id} />}
-      {item.type === 'message' && <div>{item.message}</div>}
-    </div>
-  )
+function OptionComponent(item: SearchOptionItem) {
+  if (item.type === 'nodes') return <NodeOption id={item.id} />
+  if (item.type === 'message') return <div className="p-2 text-xs text-muted-foreground">{item.message}</div>
+  return null
 }
 
+// ── Main search input ─────────────────────────────────────────────────────
+interface GraphSearchProps {
+  value?: SearchOptionItem | null
+  onFocus?: (item: SearchOptionItem | null) => void
+  onChange: (item: SearchOptionItem | null) => void
+}
 
-/**
- * Component thats display the search input.
- */
-export const GraphSearchInput = ({
-  onChange,
-  onFocus,
-  value
-}: {
-  onChange: GraphSearchInputProps['onChange']
-  onFocus?: GraphSearchInputProps['onFocus']
-  value?: GraphSearchInputProps['value']
-}) => {
+const GraphSearch: FC<GraphSearchProps> = ({ value, onFocus, onChange }) => {
   const { t } = useTranslation()
-  const graph = useGraphStore.use.sigmaGraph()
+  const rawGraph = useGraphStore.use.rawGraph()
   const searchEngine = useGraphStore.use.searchEngine()
 
-  // Reset search engine when graph changes
+  // Rebuild search engine when rawGraph changes
   useEffect(() => {
-    if (graph) {
+    if (!rawGraph || !rawGraph.nodes.length) {
       useGraphStore.getState().resetSearchEngine()
-    }
-  }, [graph]);
-
-  // Create search engine when needed
-  useEffect(() => {
-    // Skip if no graph, empty graph, or search engine already exists
-    if (!graph || graph.nodes().length === 0 || searchEngine) {
       return
     }
 
-    // Create new search engine
-    const newSearchEngine = new MiniSearch({
+    const engine = new MiniSearch<{ id: string; label: string }>({
       idField: 'id',
       fields: ['label'],
-      searchOptions: {
-        prefix: true,
-        fuzzy: 0.2,
-        boost: {
-          label: 2
-        }
-      }
+      searchOptions: { prefix: true, fuzzy: 0.2, boost: { label: 2 } }
     })
 
-    // Add nodes to search engine with safety checks
-    const documents = graph.nodes()
-      .filter(id => graph.hasNode(id)) // Ensure node exists before accessing attributes
-      .map((id: string) => ({
-        id: id,
-        label: graph.getNodeAttribute(id, 'label')
-      }))
+    const docs = rawGraph.nodes.map(n => ({
+      id: n.id,
+      label: n.labels.join(', ')
+    }))
+    if (docs.length) engine.addAll(docs)
 
-    if (documents.length > 0) {
-      newSearchEngine.addAll(documents)
-    }
+    useGraphStore.getState().setSearchEngine(engine)
+  }, [rawGraph])
 
-    // Update search engine in store
-    useGraphStore.getState().setSearchEngine(newSearchEngine)
-  }, [graph, searchEngine])
-
-  /**
-   * Loading the options while the user is typing.
-   */
   const loadOptions = useCallback(
-    async (query?: string): Promise<OptionItem[]> => {
-      if (onFocus) onFocus(null)
+    async (query?: string): Promise<SearchOptionItem[]> => {
+      if (!rawGraph || !searchEngine) return []
 
-      // Safety checks to prevent crashes
-      if (!graph || !searchEngine) {
-        return []
-      }
+      const allIds = rawGraph.nodes.map(n => n.id)
 
-      // Verify graph has nodes before proceeding
-      if (graph.nodes().length === 0) {
-        return []
-      }
-
-      // If no query, return some nodes for user to select
       if (!query) {
-        const nodeIds = graph.nodes()
-          .filter(id => graph.hasNode(id))
-          .slice(0, searchResultLimit)
-        return nodeIds.map(id => ({
-          id,
-          type: 'nodes'
-        }))
+        return allIds.slice(0, searchResultLimit).map(id => ({ id, type: 'nodes' as const }))
       }
 
-      // If has query, search nodes and verify they still exist
-      let result: OptionItem[] = searchEngine.search(query)
-        .filter((r: { id: string }) => graph.hasNode(r.id))
-        .map((r: { id: string }) => ({
-          id: r.id,
-          type: 'nodes'
-        }))
+      // Prefix / fuzzy search
+      let result: SearchOptionItem[] = (searchEngine.search(query) as { id: string }[])
+        .filter(r => rawGraph.getNode(r.id))
+        .map(r => ({ id: r.id, type: 'nodes' as const }))
 
-      // Add middle-content matching if results are few
-      // This enables matching content in the middle of text, not just from the beginning
+      // Supplement with mid-string matches if results are sparse
       if (result.length < 5) {
-        // Get already matched IDs to avoid duplicates
-        const matchedIds = new Set(result.map(item => item.id))
-
-        // Perform middle-content matching on all nodes with safety checks
-        const middleMatchResults = graph.nodes()
-          .filter(id => {
-            // Skip already matched nodes
-            if (matchedIds.has(id)) return false
-
-            // Ensure node exists before accessing attributes
-            if (!graph.hasNode(id)) return false
-
-            // Get node label safely
-            const label = graph.getNodeAttribute(id, 'label')
-            // Match if label contains query string but doesn't start with it
-            return label &&
-                   typeof label === 'string' &&
-                   !label.toLowerCase().startsWith(query.toLowerCase()) &&
-                   label.toLowerCase().includes(query.toLowerCase())
+        const matched = new Set(result.map(r => r.id))
+        const mid = rawGraph.nodes
+          .filter(n => {
+            if (matched.has(n.id)) return false
+            const lbl = n.labels.join(', ').toLowerCase()
+            return !lbl.startsWith(query.toLowerCase()) && lbl.includes(query.toLowerCase())
           })
-          .map(id => ({
-            id,
-            type: 'nodes' as const
-          }))
-
-        // Merge results
-        result = [...result, ...middleMatchResults]
+          .map(n => ({ id: n.id, type: 'nodes' as const }))
+        result = [...result, ...mid]
       }
 
-      // prettier-ignore
-      return result.length <= searchResultLimit
-        ? result
-        : [
-          ...result.slice(0, searchResultLimit),
-          {
-            type: 'message',
-            id: messageId,
-            message: t('graphPanel.search.message', { count: result.length - searchResultLimit })
-          }
-        ]
+      if (result.length <= searchResultLimit) return result
+
+      return [
+        ...result.slice(0, searchResultLimit),
+        {
+          id: '__message_item',
+          type: 'message' as const,
+          message: t('graphPanel.search.message', { count: result.length - searchResultLimit })
+        }
+      ]
     },
-    [graph, searchEngine, onFocus, t]
+    [rawGraph, searchEngine, t]
   )
 
   return (
@@ -207,26 +136,19 @@ export const GraphSearchInput = ({
       className="bg-background/60 w-24 rounded-xl border-1 opacity-60 backdrop-blur-lg transition-all hover:w-fit hover:opacity-100 w-full"
       fetcher={loadOptions}
       renderOption={OptionComponent}
-      getOptionValue={(item) => item.id}
+      getOptionValue={item => item.id}
       value={value && value.type !== 'message' ? value.id : null}
-      onChange={(id) => {
-        if (id !== messageId) onChange(id ? { id, type: 'nodes' } : null)
+      onChange={id => {
+        if (id !== '__message_item') onChange(id ? { id, type: 'nodes' } : null)
       }}
-      onFocus={(id) => {
-        if (id !== messageId && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
+      onFocus={id => {
+        if (id !== '__message_item' && onFocus) onFocus(id ? { id, type: 'nodes' } : null)
       }}
       ariaLabel={t('graphPanel.search.placeholder')}
       placeholder={t('graphPanel.search.placeholder')}
       noResultsMessage={t('graphPanel.search.placeholder')}
     />
   )
-}
-
-/**
- * Component that display the search.
- */
-const GraphSearch: FC<GraphSearchInputProps & GraphSearchContextProviderProps> = ({ ...props }) => {
-  return <GraphSearchInput {...props} />
 }
 
 export default GraphSearch

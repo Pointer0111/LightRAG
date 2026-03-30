@@ -196,6 +196,13 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
   // Create new graph instance
   const graph = new UndirectedGraph()
 
+  const centerNode = rawGraph.nodes.reduce((maxNode, current) => {
+    if (!maxNode || current.degree > maxNode.degree) {
+      return current
+    }
+    return maxNode
+  }, rawGraph.nodes[0])
+
   // Add nodes from raw graph data
   for (const rawNode of rawGraph?.nodes ?? []) {
     // Ensure we have fresh random positions for nodes
@@ -203,15 +210,19 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
     const x = Math.random()
     const y = Math.random()
 
+    const isCenterNode = rawNode.id === centerNode.id
+    const hierarchyScale = isCenterNode ? 1.95 : rawNode.degree >= centerNode.degree * 0.45 ? 1.25 : 0.92
+    const computedNodeSize = Math.max(Constants.minNodeSize, Math.round(rawNode.size * hierarchyScale))
+
     graph.addNode(rawNode.id, {
       label: rawNode.labels.join(', '),
       color: rawNode.color,
       x: x,
       y: y,
-      size: rawNode.size,
+      size: computedNodeSize,
       // for node-border
-      borderColor: Constants.nodeBorderColor,
-      borderSize: 0.2
+      borderColor: isCenterNode ? Constants.nodeBorderColorSelected : Constants.nodeBorderColor,
+      borderSize: isCenterNode ? 2.2 : 0.75
     })
   }
 
@@ -224,6 +235,7 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
       label: rawEdge.properties?.keywords || undefined,
       size: weight, // Set initial size based on weight
       originalWeight: weight, // Store original weight for recalculation
+      color: `${Constants.edgeColorDarkTheme}A6`,
       type: 'curvedNoArrow' // Explicitly set edge type to no arrow
     })
   }

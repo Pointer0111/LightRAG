@@ -1208,7 +1208,7 @@ export default function DocumentManager() {
                     onClick={() => handleStatusFilterChange('all')}
                     disabled={isRefreshing}
                     className={cn(
-                      statusFilter === 'all' && 'bg-gray-100 dark:bg-gray-900 font-medium border border-gray-400 dark:border-gray-500 shadow-sm'
+                      statusFilter === 'all' && 'bg-cyan-100/85 dark:bg-cyan-500/25 text-slate-900 dark:text-cyan-50 font-medium border border-cyan-400/70 dark:border-cyan-300/50 shadow-[0_0_14px_rgba(34,211,238,0.28)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.all')} ({statusCounts.all || documentCounts.all})
@@ -1220,7 +1220,7 @@ export default function DocumentManager() {
                     disabled={isRefreshing}
                     className={cn(
                       processedCount > 0 ? 'text-green-600' : 'text-gray-500',
-                      statusFilter === 'processed' && 'bg-green-100 dark:bg-green-900/30 font-medium border border-green-400 dark:border-green-600 shadow-sm'
+                      statusFilter === 'processed' && 'bg-green-100/85 dark:bg-green-500/25 text-slate-900 dark:text-green-50 font-medium border border-green-400/70 dark:border-green-300/50 shadow-[0_0_14px_rgba(34,197,94,0.28)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.completed')} ({processedCount})
@@ -1232,7 +1232,7 @@ export default function DocumentManager() {
                     disabled={isRefreshing}
                     className={cn(
                       preprocessedCount > 0 ? 'text-purple-600' : 'text-gray-500',
-                      statusFilter === 'preprocessed' && 'bg-purple-100 dark:bg-purple-900/30 font-medium border border-purple-400 dark:border-purple-600 shadow-sm'
+                      statusFilter === 'preprocessed' && 'bg-purple-100/85 dark:bg-purple-500/25 text-slate-900 dark:text-purple-50 font-medium border border-purple-400/70 dark:border-purple-300/50 shadow-[0_0_14px_rgba(168,85,247,0.3)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.preprocessed')} ({preprocessedCount})
@@ -1244,7 +1244,7 @@ export default function DocumentManager() {
                     disabled={isRefreshing}
                     className={cn(
                       processingCount > 0 ? 'text-blue-600' : 'text-gray-500',
-                      statusFilter === 'processing' && 'bg-blue-100 dark:bg-blue-900/30 font-medium border border-blue-400 dark:border-blue-600 shadow-sm'
+                      statusFilter === 'processing' && 'bg-blue-100/85 dark:bg-blue-500/25 text-slate-900 dark:text-blue-50 font-medium border border-blue-400/70 dark:border-blue-300/50 shadow-[0_0_14px_rgba(59,130,246,0.3)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.processing')} ({processingCount})
@@ -1256,7 +1256,7 @@ export default function DocumentManager() {
                     disabled={isRefreshing}
                     className={cn(
                       pendingCount > 0 ? 'text-yellow-600' : 'text-gray-500',
-                      statusFilter === 'pending' && 'bg-yellow-100 dark:bg-yellow-900/30 font-medium border border-yellow-400 dark:border-yellow-600 shadow-sm'
+                      statusFilter === 'pending' && 'bg-yellow-100/85 dark:bg-yellow-500/25 text-slate-900 dark:text-yellow-50 font-medium border border-yellow-400/70 dark:border-yellow-300/50 shadow-[0_0_14px_rgba(250,204,21,0.28)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.pending')} ({pendingCount})
@@ -1268,7 +1268,7 @@ export default function DocumentManager() {
                     disabled={isRefreshing}
                     className={cn(
                       failedCount > 0 ? 'text-red-600' : 'text-gray-500',
-                      statusFilter === 'failed' && 'bg-red-100 dark:bg-red-900/30 font-medium border border-red-400 dark:border-red-600 shadow-sm'
+                      statusFilter === 'failed' && 'bg-red-100/85 dark:bg-red-500/25 text-slate-900 dark:text-red-50 font-medium border border-red-400/70 dark:border-red-300/50 shadow-[0_0_14px_rgba(248,113,113,0.28)]'
                     )}
                   >
                     {t('documentPanel.documentManager.status.failed')} ({failedCount})

@@ -21,8 +21,10 @@ function NavigationTab({ value, currentTab, children }: NavigationTabProps) {
     <TabsTrigger
       value={value}
       className={cn(
-        'cursor-pointer px-2 py-1 transition-all',
-        currentTab === value ? '!bg-emerald-400 !text-zinc-50' : 'hover:bg-background/60'
+        'cursor-pointer px-3 py-1.5 text-[12px] tracking-wide uppercase transition-all duration-300 border border-transparent data-[state=active]:shadow-[0_0_20px_rgba(0,255,255,0.35)]',
+        currentTab === value
+          ? '!bg-cyan-400/25 !text-cyan-100 !border-cyan-300/70'
+          : 'bg-slate-900/35 text-slate-200 hover:bg-cyan-500/15 hover:text-cyan-100 hover:border-cyan-300/30'
       )}
     >
       {children}
@@ -36,7 +38,7 @@ function TabsNavigation() {
 
   return (
     <div className="flex h-8 self-center">
-      <TabsList className="h-full gap-2">
+      <TabsList className="h-full gap-2 bg-slate-950/35 border border-cyan-400/25 backdrop-blur-xl shadow-[0_0_24px_rgba(0,255,255,0.18)]">
         <NavigationTab value="documents" currentTab={currentTab}>
           {t('header.documents')}
         </NavigationTab>
@@ -73,19 +75,19 @@ export default function SiteHeader() {
   }
 
   return (
-    <header className="border-border/40 bg-background/95 supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50 flex h-10 w-full border-b px-4 backdrop-blur">
+    <header className="border-cyan-400/25 bg-slate-950/55 supports-[backdrop-filter]:bg-slate-950/45 sticky top-0 z-50 flex h-11 w-full border-b px-4 backdrop-blur-xl shadow-[0_8px_32px_rgba(4,10,30,0.65)]">
       <div className="min-w-[200px] w-auto flex items-center">
         <a href={webuiPrefix} className="flex items-center gap-2">
-          <ZapIcon className="size-4 text-emerald-400" aria-hidden="true" />
-          <span className="font-bold md:inline-block">{SiteInfo.name}</span>
+          <ZapIcon className="size-4 text-cyan-300 drop-shadow-[0_0_8px_rgba(45,212,191,0.9)]" aria-hidden="true" />
+          <span className="font-bold md:inline-block text-cyan-50 tracking-wide">{SiteInfo.name}</span>
         </a>
         {webuiTitle && (
           <div className="flex items-center">
-            <span className="mx-1 text-xs text-gray-500 dark:text-gray-400">|</span>
+            <span className="mx-1 text-xs text-cyan-300/70 dark:text-cyan-200/70">|</span>
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="font-medium text-sm cursor-default">
+                  <span className="font-medium text-sm cursor-default text-cyan-100">
                     {webuiTitle}
                   </span>
                 </TooltipTrigger>
@@ -103,7 +105,7 @@ export default function SiteHeader() {
       <div className="flex h-10 flex-1 items-center justify-center">
         <TabsNavigation />
         {isGuestMode && (
-          <div className="ml-2 self-center px-2 py-1 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 rounded-md">
+          <div className="ml-2 self-center px-2 py-1 text-xs bg-amber-400/15 border border-amber-300/35 text-amber-100 rounded-md shadow-[0_0_12px_rgba(251,191,36,0.35)]">
             {t('login.guestMode', 'Guest Mode')}
           </div>
         )}
@@ -115,7 +117,7 @@ export default function SiteHeader() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="text-xs text-gray-500 dark:text-gray-400 mr-1 cursor-default">
+                  <span className="text-xs text-cyan-100/70 mr-1 cursor-default">
                     v{versionDisplay}
                   </span>
                 </TooltipTrigger>
@@ -125,7 +127,7 @@ export default function SiteHeader() {
               </Tooltip>
             </TooltipProvider>
           )}
-          <Button variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')}>
+          <Button variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')} className="text-cyan-100/80 hover:bg-cyan-400/15 hover:text-cyan-100">
             <a href={SiteInfo.github} target="_blank" rel="noopener noreferrer">
               <GithubIcon className="size-4" aria-hidden="true" />
             </a>
@@ -138,6 +140,7 @@ export default function SiteHeader() {
               side="bottom"
               tooltip={`${t('header.logout')} (${username})`}
               onClick={handleLogout}
+              className="text-cyan-100/80 hover:bg-cyan-400/15 hover:text-cyan-100"
             >
               <LogOutIcon className="size-4" aria-hidden="true" />
             </Button>

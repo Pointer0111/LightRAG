@@ -1,20 +1,12 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-// import { MiniMap } from '@react-sigma/minimap'
-import { SigmaContainer, useRegisterEvents, useSigma } from '@react-sigma/core'
-import { Settings as SigmaSettings } from 'sigma/settings'
-import { GraphSearchOption, OptionItem } from '@react-sigma/graph-search'
-import { EdgeArrowProgram, NodePointProgram, NodeCircleProgram } from 'sigma/rendering'
-import { NodeBorderProgram } from '@sigma/node-border'
-import { EdgeCurvedArrowProgram, createEdgeCurveProgram } from '@sigma/edge-curve'
+import ForceGraph2D from 'react-force-graph-2d'
 
-import FocusOnNode from '@/components/graph/FocusOnNode'
 import LayoutsControl from '@/components/graph/LayoutsControl'
 import GraphControl from '@/components/graph/GraphControl'
-// import ThemeToggle from '@/components/ThemeToggle'
 import ZoomControl from '@/components/graph/ZoomControl'
 import FullScreenControl from '@/components/graph/FullScreenControl'
 import Settings from '@/components/graph/Settings'
-import GraphSearch from '@/components/graph/GraphSearch'
+import GraphSearch, { SearchOptionItem } from '@/components/graph/GraphSearch'
 import GraphLabels from '@/components/graph/GraphLabels'
 import PropertiesView from '@/components/graph/PropertiesView'
 import SettingsDisplay from '@/components/graph/SettingsDisplay'
@@ -23,233 +15,466 @@ import LegendButton from '@/components/graph/LegendButton'
 
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
-import { labelColorDarkTheme, labelColorLightTheme } from '@/lib/constants'
+import useLightragGraph from '@/hooks/useLightragGraph'
 
-import '@react-sigma/core/lib/style.css'
-import '@react-sigma/graph-search/lib/style.css'
-
-// Function to create sigma settings based on theme
-const createSigmaSettings = (isDarkTheme: boolean): Partial<SigmaSettings> => ({
-  allowInvalidContainer: true,
-  defaultNodeType: 'default',
-  defaultEdgeType: 'curvedNoArrow',
-  renderEdgeLabels: false,
-  edgeProgramClasses: {
-    arrow: EdgeArrowProgram,
-    curvedArrow: EdgeCurvedArrowProgram,
-    curvedNoArrow: createEdgeCurveProgram()
-  },
-  nodeProgramClasses: {
-    default: NodeBorderProgram,
-    circel: NodeCircleProgram,
-    point: NodePointProgram
-  },
-  labelGridCellSize: 60,
-  labelRenderedSizeThreshold: 12,
-  enableEdgeEvents: true,
-  labelColor: {
-    color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor'
-  },
-  edgeLabelColor: {
-    color: isDarkTheme ? labelColorDarkTheme : labelColorLightTheme,
-    attribute: 'labelColor'
-  },
-  edgeLabelSize: 8,
-  labelSize: 12
-  // minEdgeThickness: 2
-  // labelFont: 'Lato, sans-serif'
-})
-
-const GraphEvents = () => {
-  const registerEvents = useRegisterEvents()
-  const sigma = useSigma()
-  const [draggedNode, setDraggedNode] = useState<string | null>(null)
-
-  useEffect(() => {
-    // Register the events
-    registerEvents({
-      downNode: (e) => {
-        setDraggedNode(e.node)
-        sigma.getGraph().setNodeAttribute(e.node, 'highlighted', true)
-      },
-      // On mouse move, if the drag mode is enabled, we change the position of the draggedNode
-      mousemovebody: (e) => {
-        if (!draggedNode) return
-        // Get new position of node
-        const pos = sigma.viewportToGraph(e)
-        sigma.getGraph().setNodeAttribute(draggedNode, 'x', pos.x)
-        sigma.getGraph().setNodeAttribute(draggedNode, 'y', pos.y)
-
-        // Prevent sigma to move camera:
-        e.preventSigmaDefault()
-        e.original.preventDefault()
-        e.original.stopPropagation()
-      },
-      // On mouse up, we reset the autoscale and the dragging mode
-      mouseup: () => {
-        if (draggedNode) {
-          setDraggedNode(null)
-          sigma.getGraph().removeNodeAttribute(draggedNode, 'highlighted')
-        }
-      },
-      // Disable the autoscale at the first down interaction
-      mousedown: (e) => {
-        // Only set custom BBox if it's a drag operation (mouse button is pressed)
-        const mouseEvent = e.original as MouseEvent;
-        if (mouseEvent.buttons !== 0 && !sigma.getCustomBBox()) {
-          sigma.setCustomBBox(sigma.getBBox())
-        }
-      }
-    })
-  }, [registerEvents, sigma, draggedNode])
-
-  return null
+// ── FGMethods: imperative API we use from react-force-graph-2d ──────────────
+// ForceGraphMethods doesn't expose d3 simulation helpers in its types,
+// so we define our own interface and use `as any` on the ref.
+export interface FGMethods {
+  d3Force: (name: string, force?: any) => any
+  d3AlphaMin: (alpha?: number) => any
+  d3VelocityDecay: (decay?: number) => any
+  d3ReheatSimulation: () => void
+  zoomToFit: (duration?: number, padding?: number) => void
+  zoom: (k?: number, duration?: number) => any
+  centerAt: (x?: number, y?: number, duration?: number) => void
+  refresh?: () => void
+  pauseAnimation: () => void
+  resumeAnimation: () => void
 }
 
-const GraphViewer = () => {
-  const [isThemeSwitching, setIsThemeSwitching] = useState(false)
-  const sigmaRef = useRef<any>(null)
-  const prevTheme = useRef<string>('')
+// ── Color helpers ─────────────────────────────────────────────────────────────
+const hexToRgba = (hex: string, alpha: number): string => {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.substring(0, 2), 16)
+  const g = parseInt(h.substring(2, 4), 16)
+  const b = parseInt(h.substring(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
 
+// Build a neighbour set for a given node id
+const buildNeighbourSet = (
+  nodeId: string,
+  links: any[]
+): Set<string> => {
+  const neighbours = new Set<string>()
+  neighbours.add(nodeId)
+  for (const link of links) {
+    const src = typeof link.source === 'object' ? link.source.id : link.source
+    const tgt = typeof link.target === 'object' ? link.target.id : link.target
+    if (src === nodeId) neighbours.add(tgt)
+    if (tgt === nodeId) neighbours.add(src)
+  }
+  return neighbours
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GraphViewer = () => {
+  const fgRef = useRef<FGMethods | undefined>(undefined)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  // ── Repaint ticker: incrementing this forces ForceGraph2D to re-render ────
+  const [repaintTick, setRepaintTick] = useState(0)
+
+  // ── Data hook ────────────────────────────────────────────────────────────
+  useLightragGraph()
+
+  const rawGraph = useGraphStore.use.rawGraph()
   const selectedNode = useGraphStore.use.selectedNode()
-  const focusedNode = useGraphStore.use.focusedNode()
-  const moveToSelectedNode = useGraphStore.use.moveToSelectedNode()
   const isFetching = useGraphStore.use.isFetching()
+  const moveToSelectedNode = useGraphStore.use.moveToSelectedNode()
 
   const showPropertyPanel = useSettingsStore.use.showPropertyPanel()
   const showNodeSearchBar = useSettingsStore.use.showNodeSearchBar()
-  const enableNodeDrag = useSettingsStore.use.enableNodeDrag()
   const showLegend = useSettingsStore.use.showLegend()
-  const theme = useSettingsStore.use.theme()
 
-  // Memoize sigma settings to prevent unnecessary re-creation
-  const memoizedSigmaSettings = useMemo(() => {
-    const isDarkTheme = theme === 'dark'
-    return createSigmaSettings(isDarkTheme)
-  }, [theme])
-
-  // Initialize sigma settings based on theme with theme switching protection
+  // ── Responsive container ────────────────────────────────────────────────
   useEffect(() => {
-    // Detect theme change
-    const isThemeChange = prevTheme.current && prevTheme.current !== theme
-    if (isThemeChange) {
-      setIsThemeSwitching(true)
-      console.log('Theme switching detected:', prevTheme.current, '->', theme)
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver(entries => {
+      const rect = entries[0].contentRect
+      setDimensions({ width: rect.width, height: rect.height })
+    })
+    observer.observe(el)
+    setDimensions({ width: el.clientWidth, height: el.clientHeight })
+    return () => observer.disconnect()
+  }, [])
 
-      // Reset theme switching state after a short delay
-      const timer = setTimeout(() => {
-        setIsThemeSwitching(false)
-        console.log('Theme switching completed')
-      }, 150)
-
-      return () => clearTimeout(timer)
+  // ── Convert rawGraph → ForceGraph2D format ──────────────────────────────
+  const graphData = useMemo(() => {
+    if (!rawGraph || !rawGraph.nodes.length) {
+      return { nodes: [] as any[], links: [] as any[] }
     }
-    prevTheme.current = theme
-    console.log('Initialized sigma settings for theme:', theme)
-  }, [theme])
 
-  // Clean up sigma instance when component unmounts
-  useEffect(() => {
-    return () => {
-      // TAB is mount twice in vite dev mode, this is a workaround
+    // Degree range for size scaling
+    const degrees = rawGraph.nodes.map(n => n.degree ?? 0)
+    const maxDegree = Math.max(...degrees, 1)
+    const minDegree = Math.min(...degrees, 0)
+    const degreeRange = maxDegree - minDegree || 1
 
-      const sigma = useGraphStore.getState().sigmaInstance;
-      if (sigma) {
-        try {
-          // Destroy sigma，and clear WebGL context
-          sigma.kill();
-          useGraphStore.getState().setSigmaInstance(null);
-          console.log('Cleared sigma instance on Graphviewer unmount');
-        } catch (error) {
-          console.error('Error cleaning up sigma instance:', error);
+    return {
+      nodes: rawGraph.nodes.map(n => {
+        // Node radius: degree drives size (min 4, max 22)
+        const normDeg = ((n.degree ?? 0) - minDegree) / degreeRange
+        const radius = 4 + normDeg * 18
+        return {
+          id: n.id,
+          label: n.labels.join(', '),
+          color: n.color,
+          size: radius,          // visual radius used by canvas painter
+          degree: n.degree,
+          properties: n.properties
         }
+      }),
+      links: rawGraph.edges.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        dynamicId: e.dynamicId,
+        label: e.properties?.keywords || '',
+        weight: typeof e.properties?.weight === 'number' ? e.properties.weight : 1,
+        properties: e.properties
+      }))
+    }
+  }, [rawGraph])
+
+  // ── Neighbour set of the selected node ────────────────────────────────────
+  const neighbourSet = useMemo(() => {
+    if (!selectedNode) return null
+    return buildNeighbourSet(selectedNode, graphData.links)
+  }, [selectedNode, graphData.links])
+
+  // ── Force canvas redraw when selection/neighbour set changes ──────────────
+  // The most reliable way: increment a counter that's passed as a key prop
+  // to trigger a full re-render of the canvas.
+  useEffect(() => {
+    setRepaintTick(t => t + 1)
+  }, [neighbourSet, selectedNode])
+  useEffect(() => {
+    if (!moveToSelectedNode || !selectedNode || !fgRef.current) return
+    const nodeData = graphData.nodes.find((n: any) => n.id === selectedNode)
+    if (!nodeData || nodeData.x === undefined) return
+
+    fgRef.current.centerAt(nodeData.x, nodeData.y, 600)
+    fgRef.current.zoom(3, 600)
+    useGraphStore.getState().setMoveToSelectedNode(false)
+  }, [moveToSelectedNode, selectedNode, graphData.nodes])
+
+  // ── Canvas node painter ───────────────────────────────────────────────────
+  const nodeCanvasObject = useCallback(
+    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const { selectedNode: sel, focusedNode: foc } = useGraphStore.getState()
+
+      const isSelected = node.id === sel
+      const isFocused = node.id === foc
+      const isNeighbour = neighbourSet ? neighbourSet.has(node.id) : true
+      const isDimmed = neighbourSet ? !isNeighbour : false
+
+      const x: number = node.x ?? 0
+      const y: number = node.y ?? 0
+      const r: number = node.size ?? 6
+      const rawColor: string = node.color || '#00e0ff'
+
+      // ── Outer glow ring (selected / focused) ─────────────────────────
+      if (isSelected || isFocused) {
+        const glowR = r * (isSelected ? 2.2 : 1.7)
+        const grad = ctx.createRadialGradient(x, y, r * 0.5, x, y, glowR)
+        const glowColor = isSelected ? '#ff8a3d' : '#00e0ff'
+        grad.addColorStop(0, hexToRgba(glowColor, isSelected ? 0.55 : 0.35))
+        grad.addColorStop(1, hexToRgba(glowColor, 0))
+        ctx.beginPath()
+        ctx.arc(x, y, glowR, 0, Math.PI * 2)
+        ctx.fillStyle = grad
+        ctx.fill()
       }
-    };
-  }, []);
 
-  // Note: There was a useLayoutEffect hook here to set up the sigma instance and graph data,
-  // but testing showed it wasn't executing or having any effect, while the backup mechanism
-  // in GraphControl was sufficient. This code was removed to simplify implementation
+      // ── Main circle ──────────────────────────────────────────────────
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
 
-  const onSearchFocus = useCallback((value: GraphSearchOption | null) => {
+      if (isDimmed) {
+        ctx.fillStyle = 'rgba(30,40,60,0.35)'
+        ctx.strokeStyle = 'rgba(80,100,130,0.25)'
+      } else {
+        ctx.fillStyle = hexToRgba(rawColor, isSelected ? 1 : isFocused ? 0.95 : 0.82)
+        ctx.strokeStyle = isSelected
+          ? '#ff8a3d'
+          : isFocused
+          ? '#ffffff'
+          : hexToRgba(rawColor, 0.55)
+      }
+      ctx.lineWidth = isSelected ? 2.5 / globalScale : 1.5 / globalScale
+      ctx.fill()
+      ctx.stroke()
+
+      // ── Label ────────────────────────────────────────────────────────
+      if (!isDimmed) {
+        const label: string = node.label || node.id
+        const fontSize = Math.max(3, Math.min(14 / globalScale, r * 0.9))
+        ctx.font = `${fontSize}px 'Inter', sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+
+        // label background pill
+        const textWidth = ctx.measureText(label).width
+        const padX = fontSize * 0.4
+        const padY = fontSize * 0.25
+        const labelY = y + r + fontSize * 0.9
+        ctx.fillStyle = 'rgba(5,10,20,0.72)'
+        ctx.beginPath()
+        ctx.roundRect(
+          x - textWidth / 2 - padX,
+          labelY - padY - fontSize / 2,
+          textWidth + padX * 2,
+          fontSize + padY * 2,
+          3 / globalScale
+        )
+        ctx.fill()
+
+        ctx.fillStyle = isSelected ? '#ff8a3d' : isFocused ? '#ffffff' : '#c8f0ff'
+        ctx.fillText(label, x, labelY)
+      }
+    },
+    [neighbourSet, repaintTick]
+  )
+
+  // ── Link color ────────────────────────────────────────────────────────────
+  const linkColor = useCallback(
+    (link: any) => {
+      const { focusedEdge, selectedEdge } = useGraphStore.getState()
+      const id = link.dynamicId ?? link.id
+      const src = typeof link.source === 'object' ? link.source.id : link.source
+      const tgt = typeof link.target === 'object' ? link.target.id : link.target
+
+      if (id === selectedEdge) return '#ff8a3d'
+      if (id === focusedEdge) return '#ffffff'
+
+      // Dim links that don't connect to selected node
+      if (neighbourSet) {
+        const connected = neighbourSet.has(src) && neighbourSet.has(tgt)
+        if (!connected) return 'rgba(60,80,110,0.18)'
+        return '#00e0ff'
+      }
+      return '#00e0ff'
+    },
+    [neighbourSet, repaintTick]
+  )
+
+  const linkWidth = useCallback((link: any) => {
+    const { focusedEdge, selectedEdge } = useGraphStore.getState()
+    const id = link.dynamicId ?? link.id
+    if (id === selectedEdge) return 2
+    if (id === focusedEdge) return 1.5
+    return 0.8
+  }, [])
+
+  // ── Custom link painter: curved arc that stops at node edges ─────────────
+  const linkCanvasObject = useCallback(
+    (link: any, ctx: CanvasRenderingContext2D) => {
+      const source = link.source
+      const target = link.target
+      if (!source || !target) return
+
+      const sx: number = source.x ?? 0
+      const sy: number = source.y ?? 0
+      const tx: number = target.x ?? 0
+      const ty: number = target.y ?? 0
+      const sr: number = source.size ?? 6
+      const tr: number = target.size ?? 6
+
+      // Self-loop: skip
+      if (source.id === target.id) return
+
+      const dx = tx - sx
+      const dy = ty - sy
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist === 0) return
+
+      // Unit vector from source to target
+      const ux = dx / dist
+      const uy = dy / dist
+
+      // Start/end points offset by node radius so line starts at node edge
+      const x1 = sx + ux * sr
+      const y1 = sy + uy * sr
+      const x2 = tx - ux * tr
+      const y2 = ty - uy * tr
+
+      // Curvature control point (perpendicular offset = 25% of distance)
+      const curvature = 0.25
+      const mx = (x1 + x2) / 2
+      const my = (y1 + y2) / 2
+      // Perpendicular direction
+      const px = -uy
+      const py = ux
+      const offset = dist * curvature * 0.5
+      const cpx = mx + px * offset
+      const cpy = my + py * offset
+
+      // Determine color and width
+      const { focusedEdge, selectedEdge } = useGraphStore.getState()
+      const id = link.dynamicId ?? link.id
+      const src = typeof link.source === 'object' ? link.source.id : link.source
+      const tgt = typeof link.target === 'object' ? link.target.id : link.target
+
+      let color: string
+      let width: number
+
+      if (id === selectedEdge) {
+        color = '#ff8a3d'
+        width = 2
+      } else if (id === focusedEdge) {
+        color = '#ffffff'
+        width = 1.5
+      } else if (neighbourSet) {
+        const connected = neighbourSet.has(src) && neighbourSet.has(tgt)
+        color = connected ? '#00e0ff' : 'rgba(60,80,110,0.15)'
+        width = connected ? 0.8 : 0.4
+      } else {
+        color = '#00e0ff'
+        width = 0.8
+      }
+
+      ctx.save()
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.quadraticCurveTo(cpx, cpy, x2, y2)
+      ctx.strokeStyle = color
+      ctx.lineWidth = width
+      ctx.stroke()
+      ctx.restore()
+    },
+    [neighbourSet, repaintTick]
+  )
+
+  // ── Event handlers ─────────────────────────────────────────────────────
+  const handleNodeClick = useCallback((node: any) => {
+    const { selectedNode: cur, setSelectedNode, setFocusedNode, clearSelection } =
+      useGraphStore.getState()
+    // Toggle: clicking the same node deselects
+    if (cur === node.id) {
+      clearSelection()
+    } else {
+      setSelectedNode(node.id)
+      setFocusedNode(node.id)
+    }
+  }, [])
+
+  const handleNodeHover = useCallback((node: any) => {
+    useGraphStore.getState().setFocusedNode(node?.id ?? null)
+    if (containerRef.current) {
+      containerRef.current.style.cursor = node ? 'pointer' : 'default'
+    }
+  }, [])
+
+  const handleLinkHover = useCallback((link: any) => {
+    useGraphStore.getState().setFocusedEdge(link?.dynamicId ?? link?.id ?? null)
+  }, [])
+
+  const handleLinkClick = useCallback((link: any) => {
+    const { setSelectedEdge, setSelectedNode } = useGraphStore.getState()
+    setSelectedEdge(link.dynamicId ?? link.id)
+    setSelectedNode(null)
+  }, [])
+
+  const handleBackgroundClick = useCallback(() => {
+    useGraphStore.getState().clearSelection()
+  }, [])
+
+  // ── Search ─────────────────────────────────────────────────────────────
+  const onSearchFocus = useCallback((value: SearchOptionItem | null) => {
     if (value === null) useGraphStore.getState().setFocusedNode(null)
     else if (value.type === 'nodes') useGraphStore.getState().setFocusedNode(value.id)
   }, [])
 
-  const onSearchSelect = useCallback((value: GraphSearchOption | null) => {
-    if (value === null) {
-      useGraphStore.getState().setSelectedNode(null)
-    } else if (value.type === 'nodes') {
-      useGraphStore.getState().setSelectedNode(value.id, true)
-    }
+  const onSearchSelect = useCallback((value: SearchOptionItem | null) => {
+    if (value === null) useGraphStore.getState().setSelectedNode(null)
+    else if (value.type === 'nodes') useGraphStore.getState().setSelectedNode(value.id, true)
   }, [])
 
-  const autoFocusedNode = useMemo(() => focusedNode ?? selectedNode, [focusedNode, selectedNode])
   const searchInitSelectedNode = useMemo(
-    (): OptionItem | null => (selectedNode ? { type: 'nodes', id: selectedNode } : null),
+    () => (selectedNode ? { type: 'nodes' as const, id: selectedNode } : null),
     [selectedNode]
   )
 
-  // Always render SigmaContainer but control its visibility with CSS
+  // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="relative h-full w-full overflow-hidden">
-      <SigmaContainer
-        settings={memoizedSigmaSettings}
-        className="!bg-background !size-full overflow-hidden"
-        ref={sigmaRef}
-      >
-        <GraphControl />
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden"
+      style={{ background: '#050a14' }}
+    >
+      {/* ── 2D Force Graph ──────────────────────────────────────────────── */}
+      <ForceGraph2D
+        ref={fgRef as any}
+        graphData={graphData}
+        backgroundColor="#050a14"
+        width={dimensions.width}
+        height={dimensions.height}
+        // Node
+        nodeCanvasObject={nodeCanvasObject}
+        nodeCanvasObjectMode={() => 'replace'}
+        nodeLabel={(node: any) => node.label || node.id}
+        nodeRelSize={1}
+        nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+          // Hit area = full circle radius so clicking anywhere on the node works
+          ctx.beginPath()
+          ctx.arc(node.x ?? 0, node.y ?? 0, (node.size ?? 6) + 2, 0, Math.PI * 2)
+          ctx.fillStyle = color
+          ctx.fill()
+        }}
+        // Link – custom curved painter stopping at node edges
+        linkCanvasObject={linkCanvasObject}
+        linkCanvasObjectMode={() => 'replace'}
+        linkWidth={linkWidth}
+        linkColor={linkColor}
+        // Events
+        onNodeClick={handleNodeClick}
+        onNodeHover={handleNodeHover}
+        onLinkHover={handleLinkHover}
+        onLinkClick={handleLinkClick}
+        onBackgroundClick={handleBackgroundClick}
+      />
 
-        {enableNodeDrag && <GraphEvents />}
+      {/* ── Physics configuration (invisible) ──────────────────────────── */}
+      <GraphControl fgRef={fgRef} graphData={graphData} />
 
-        <FocusOnNode node={autoFocusedNode} move={moveToSelectedNode} />
-
-        <div className="absolute top-2 left-2 flex items-start gap-2">
-          <GraphLabels />
-          {showNodeSearchBar && !isThemeSwitching && (
-            <GraphSearch
-              value={searchInitSelectedNode}
-              onFocus={onSearchFocus}
-              onChange={onSearchSelect}
-            />
-          )}
-        </div>
-
-        <div className="bg-background/60 absolute bottom-2 left-2 flex flex-col rounded-xl border-2 backdrop-blur-lg">
-          <LayoutsControl />
-          <ZoomControl />
-          <FullScreenControl />
-          <LegendButton />
-          <Settings />
-          {/* <ThemeToggle /> */}
-        </div>
-
-        {showPropertyPanel && (
-          <div className="absolute top-2 right-2 z-10">
-            <PropertiesView />
-          </div>
+      {/* ── Top-left: label selector + search ──────────────────────────── */}
+      <div className="absolute top-2 left-2 z-10 flex items-start gap-2">
+        <GraphLabels />
+        {showNodeSearchBar && (
+          <GraphSearch
+            value={searchInitSelectedNode}
+            onFocus={onSearchFocus}
+            onChange={onSearchSelect}
+          />
         )}
+      </div>
 
-        {showLegend && (
-          <div className="absolute bottom-10 right-2 z-0">
-            <Legend className="bg-background/60 backdrop-blur-lg" />
-          </div>
-        )}
+      {/* ── Bottom-left: controls ───────────────────────────────────────── */}
+      <div className="absolute bottom-2 left-2 z-10 flex flex-col rounded-xl border border-cyan-400/30 bg-slate-950/55 shadow-[0_0_26px_rgba(56,189,248,0.22)] backdrop-blur-xl">
+        <LayoutsControl fgRef={fgRef} />
+        <ZoomControl fgRef={fgRef} />
+        <FullScreenControl containerRef={containerRef} />
+        <LegendButton />
+        <Settings />
+      </div>
 
-        {/* <div className="absolute bottom-2 right-2 flex flex-col rounded-xl border-2">
-          <MiniMap width="100px" height="100px" />
-        </div> */}
+      {/* ── Right: properties panel ─────────────────────────────────────── */}
+      {showPropertyPanel && (
+        <div className="absolute top-2 right-2 z-10">
+          <PropertiesView />
+        </div>
+      )}
 
-        <SettingsDisplay />
-      </SigmaContainer>
+      {/* ── Bottom-right: legend ────────────────────────────────────────── */}
+      {showLegend && (
+        <div className="absolute bottom-10 right-2 z-0">
+          <Legend className="border border-cyan-400/30 bg-slate-950/55 shadow-[0_0_24px_rgba(56,189,248,0.2)] backdrop-blur-xl" />
+        </div>
+      )}
 
-      {/* Loading overlay - shown when data is loading or theme is switching */}
-      {(isFetching || isThemeSwitching) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
+      <SettingsDisplay />
+
+      {/* ── Loading overlay ──────────────────────────────────────────────── */}
+      {isFetching && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
           <div className="text-center">
-            <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
-            <p>{isThemeSwitching ? 'Switching Theme...' : 'Loading Graph Data...'}</p>
+            <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-4 border-cyan-400 border-t-transparent" />
+            <p className="text-sm text-cyan-300">Loading Graph Data...</p>
           </div>
         </div>
       )}
@@ -258,3 +483,4 @@ const GraphViewer = () => {
 }
 
 export default GraphViewer
+        
