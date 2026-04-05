@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/state'
 import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { navigationService } from '@/services/navigation'
-import { ZapIcon, GithubIcon, LogOutIcon } from 'lucide-react'
+import { ZapIcon, LogOutIcon } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip'
 
 interface NavigationTabProps {
@@ -48,9 +48,6 @@ function TabsNavigation() {
         <NavigationTab value="retrieval" currentTab={currentTab}>
           {t('header.retrieval')}
         </NavigationTab>
-        <NavigationTab value="api" currentTab={currentTab}>
-          {t('header.api')}
-        </NavigationTab>
       </TabsList>
     </div>
   )
@@ -58,17 +55,7 @@ function TabsNavigation() {
 
 export default function SiteHeader() {
   const { t } = useTranslation()
-  const { isGuestMode, coreVersion, apiVersion, username, webuiTitle, webuiDescription } = useAuthStore()
-
-  const versionDisplay = (coreVersion && apiVersion)
-    ? `${coreVersion}/${apiVersion}`
-    : null;
-
-  // Check if frontend needs rebuild (apiVersion ends with warning symbol)
-  const hasWarning = apiVersion?.endsWith('⚠️');
-  const versionTooltip = hasWarning
-    ? t('header.frontendNeedsRebuild')
-    : versionDisplay ? `v${versionDisplay}` : '';
+  const { isGuestMode, username, webuiTitle, webuiDescription } = useAuthStore()
 
   const handleLogout = () => {
     navigationService.navigateToLogin();
@@ -104,34 +91,10 @@ export default function SiteHeader() {
 
       <div className="flex h-10 flex-1 items-center justify-center">
         <TabsNavigation />
-        {isGuestMode && (
-          <div className="ml-2 self-center px-2 py-1 text-xs bg-amber-400/15 border border-amber-300/35 text-amber-100 rounded-md shadow-[0_0_12px_rgba(251,191,36,0.35)]">
-            {t('login.guestMode', 'Guest Mode')}
-          </div>
-        )}
       </div>
 
       <nav className="w-[200px] flex items-center justify-end">
         <div className="flex items-center gap-2">
-          {versionDisplay && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="text-xs text-cyan-100/70 mr-1 cursor-default">
-                    v{versionDisplay}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {versionTooltip}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          <Button variant="ghost" size="icon" side="bottom" tooltip={t('header.projectRepository')} className="text-cyan-100/80 hover:bg-cyan-400/15 hover:text-cyan-100">
-            <a href={SiteInfo.github} target="_blank" rel="noopener noreferrer">
-              <GithubIcon className="size-4" aria-hidden="true" />
-            </a>
-          </Button>
           <AppSettings />
           {!isGuestMode && (
             <Button
