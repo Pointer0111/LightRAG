@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import ThemeProvider from '@/components/ThemeProvider'
 import TabVisibilityProvider from '@/contexts/TabVisibilityProvider'
 import ApiKeyAlert from '@/components/ApiKeyAlert'
@@ -17,14 +18,39 @@ import RetrievalTesting from '@/features/RetrievalTesting'
 
 import { Tabs, TabsContent } from '@/components/ui/Tabs'
 
+const VALID_TABS = ['documents', 'knowledge-graph', 'retrieval'] as const
+type ValidTab = (typeof VALID_TABS)[number]
+
+const pathToTab = (pathname: string): ValidTab => {
+  const segment = pathname.replace(/^\/+/, '').split('/')[0]
+  return (VALID_TABS as readonly string[]).includes(segment)
+    ? (segment as ValidTab)
+    : 'documents'
+}
+
 function App() {
   const message = useBackendState.use.message()
   const enableHealthCheck = useSettingsStore.use.enableHealthCheck()
-  const currentTab = useSettingsStore.use.currentTab()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const currentTab = pathToTab(location.pathname)
   const [apiKeyAlertOpen, setApiKeyAlertOpen] = useState(false)
   const [initializing, setInitializing] = useState(true) // Add initializing state
   const versionCheckRef = useRef(false); // Prevent duplicate calls in Vite dev mode
   const healthCheckInitializedRef = useRef(false); // Prevent duplicate health checks in Vite dev mode
+
+  // Keep persisted tab store in sync with URL so other consumers still work
+  useEffect(() => {
+    useSettingsStore.getState().setCurrentTab(currentTab)
+  }, [currentTab])
+
+  // Normalize unknown/root paths to the default tab URL
+  useEffect(() => {
+    const segment = location.pathname.replace(/^\/+/, '').split('/')[0]
+    if (!(VALID_TABS as readonly string[]).includes(segment)) {
+      navigate(`/${currentTab}`, { replace: true })
+    }
+  }, [location.pathname, currentTab, navigate])
 
   const handleApiKeyAlertOpenChange = useCallback((open: boolean) => {
     setApiKeyAlertOpen(open)
@@ -149,8 +175,12 @@ function App() {
   }, []); // Empty dependency array ensures it only runs once on mount
 
   const handleTabChange = useCallback(
-    (tab: string) => useSettingsStore.getState().setCurrentTab(tab as any),
-    []
+    (tab: string) => {
+      if ((VALID_TABS as readonly string[]).includes(tab)) {
+        navigate(`/${tab}`)
+      }
+    },
+    [navigate]
   )
 
   useEffect(() => {
@@ -197,7 +227,7 @@ function App() {
           // Main content after initialization
           <main className="flex h-screen w-screen overflow-hidden">
             <Tabs
-              defaultValue={currentTab}
+              value={currentTab}
               className="!m-0 flex grow flex-col !p-0 overflow-hidden"
               onValueChange={handleTabChange}
             >

@@ -68,6 +68,9 @@ const AppContent = () => {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/documents" element={isAuthenticated ? <App /> : null} />
+      <Route path="/knowledge-graph" element={isAuthenticated ? <App /> : null} />
+      <Route path="/retrieval" element={isAuthenticated ? <App /> : null} />
       <Route
         path="/*"
         element={isAuthenticated ? <App /> : null}
