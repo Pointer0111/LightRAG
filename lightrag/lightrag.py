@@ -2407,6 +2407,10 @@ class LightRAG:
                 update_storage = True
 
             if all_chunks_data:
+                _max_embed_chars = (self.embedding_token_limit or 8192) * 3
+                for item in all_chunks_data.values():
+                    if len(item.get("content", "")) > _max_embed_chars:
+                        item["content"] = item["content"][:_max_embed_chars]
                 await asyncio.gather(
                     self.chunks_vdb.upsert(all_chunks_data),
                     self.text_chunks.upsert(all_chunks_data),
@@ -2507,34 +2511,41 @@ class LightRAG:
                 all_relationships_data.append(edge_data)
                 update_storage = True
 
+            # Max chars before embedding: token_limit * 3 chars/token (conservative, handles all languages)
+            _max_embed_chars = (self.embedding_token_limit or 8192) * 3
+
             # Insert entities into vector storage with consistent format
-            data_for_vdb = {
-                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                    "content": dp["entity_name"] + "\n" + dp["description"],
+            data_for_vdb = {}
+            for dp in all_entities_data:
+                content = dp["entity_name"] + "\n" + dp["description"]
+                if len(content) > _max_embed_chars:
+                    content = content[:_max_embed_chars]
+                data_for_vdb[compute_mdhash_id(dp["entity_name"], prefix="ent-")] = {
+                    "content": content,
                     "entity_name": dp["entity_name"],
                     "source_id": dp["source_id"],
                     "description": dp["description"],
                     "entity_type": dp["entity_type"],
                     "file_path": dp.get("file_path", "custom_kg"),
                 }
-                for dp in all_entities_data
-            }
             await self.entities_vdb.upsert(data_for_vdb)
 
             # Insert relationships into vector storage with consistent format
-            data_for_vdb = {
-                compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-"): {
+            data_for_vdb = {}
+            for dp in all_relationships_data:
+                content = f"{dp['keywords']}\t{dp['src_id']}\n{dp['tgt_id']}\n{dp['description']}"
+                if len(content) > _max_embed_chars:
+                    content = content[:_max_embed_chars]
+                data_for_vdb[compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-")] = {
                     "src_id": dp["src_id"],
                     "tgt_id": dp["tgt_id"],
                     "source_id": dp["source_id"],
-                    "content": f"{dp['keywords']}\t{dp['src_id']}\n{dp['tgt_id']}\n{dp['description']}",
+                    "content": content,
                     "keywords": dp["keywords"],
                     "description": dp["description"],
                     "weight": dp["weight"],
                     "file_path": dp.get("file_path", "custom_kg"),
                 }
-                for dp in all_relationships_data
-            }
             await self.relationships_vdb.upsert(data_for_vdb)
 
         except Exception as e:
