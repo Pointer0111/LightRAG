@@ -2376,6 +2376,11 @@ class LightRAG:
             chunk_to_source_map: dict[str, str] = {}
             for chunk_data in custom_kg.get("chunks", []):
                 chunk_content = sanitize_text_for_encoding(chunk_data["content"])
+                if not chunk_content:
+                    logger.warning(
+                        f"Skipping empty chunk content for source_id='{chunk_data.get('source_id', 'unknown')}'"
+                    )
+                    continue
                 source_id = chunk_data["source_id"]
                 file_path = chunk_data.get("file_path", "custom_kg")
                 tokens = len(self.tokenizer.encode(chunk_content))

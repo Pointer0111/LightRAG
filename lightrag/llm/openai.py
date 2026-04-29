@@ -780,7 +780,7 @@ async def openai_embed(
 
         for text in texts:
             if not text:
-                truncated_texts.append(text)
+                truncated_texts.append(" ")  # replace empty string to avoid API rejection (min length 1)
                 continue
 
             tokens = encoding.encode(text)
